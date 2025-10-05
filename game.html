@@ -1,0 +1,307 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>NEO Defender</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700&display=swap');
+  *{margin:0;padding:0;box-sizing:border-box;}
+  html,body{
+    height:100%;
+    overflow:hidden;
+    background:radial-gradient(circle at center, #020024 0%, #090979 50%, #000000 100%);
+    font-family:'Orbitron',sans-serif;
+    color:#00ffaa;
+  }
+  canvas{
+    display:block;
+    width:100vw;
+    height:100vh;
+    background:transparent;
+  }
+
+  #ui{
+    position:fixed;
+    left:20px;top:20px;
+    background:rgba(0,0,0,0.5);
+    padding:12px 16px;
+    border-radius:10px;
+    backdrop-filter: blur(6px);
+    border:1px solid rgba(0,255,255,0.2);
+  }
+  #ui .row{margin:4px 0;font-size:15px;}
+  #ui strong{color:#fff;}
+
+  #startScreen, #gameOver{
+    position:fixed;
+    inset:0;
+    background:rgba(0,0,15,0.9);
+    color:#00ffaa;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    text-align:center;
+    z-index:100;
+  }
+  h1{
+    font-size:46px;
+    margin-bottom:10px;
+    text-shadow:0 0 15px #00ffaa;
+  }
+  #startScreen p{color:#bdf;margin-bottom:15px;}
+  button{
+    font-family:'Orbitron',sans-serif;
+    font-weight:700;
+    border:2px solid #00ffaa;
+    background:rgba(0,255,255,0.2);
+    padding:10px 20px;
+    color:#00ffaa;
+    border-radius:10px;
+    cursor:pointer;
+    transition:all 0.3s;
+  }
+  button:hover{
+    background:#00ffaa;
+    color:#000;
+  }
+
+  #hint{
+    position:fixed;right:20px;top:20px;
+    font-size:14px;
+    color:#9ef;
+    background:rgba(0,0,0,0.4);
+    padding:8px 10px;
+    border-radius:8px;
+    border:1px solid rgba(0,136,255,0.1);
+  }
+  #gameOver { display: none; }
+
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div id="ui">
+  <div class="row"><strong>🌍 Earth Health:</strong> <span id="health">100</span>%</div>
+  <div class="row"><strong>💥 Score:</strong> <span id="score">0</span></div>
+  <div class="row"><strong>☄️ Incoming:</strong> <span id="info">Calibrating...</span></div>
+</div>
+
+<div id="hint">🖱 Aim with mouse | 🔫 Click to Fire</div>
+
+<div id="startScreen">
+  <h1>🚀 NEO DEFENDER 🌌</h1>
+  <p>Protect Earth from incoming asteroids using your laser cannon!</p>
+  <button id="startBtn">Start Mission</button>
+</div>
+
+<div id="gameOver">
+  <h1>💥 Earth Destroyed 💥</h1>
+  <p>Final Score: <span id="finalScore">0</span></p>
+  <button id="restart">Restart Mission</button>
+</div>
+
+<script>
+(() => {
+  const canvas=document.getElementById('c');
+  const ctx=canvas.getContext('2d');
+  let W=window.innerWidth,H=window.innerHeight;
+  canvas.width=W;canvas.height=H;
+
+  const startScreen=document.getElementById('startScreen');
+  const startBtn=document.getElementById('startBtn');
+  const gameOverEl=document.getElementById('gameOver');
+  const restartBtn=document.getElementById('restart');
+  const finalScoreEl=document.getElementById('finalScore');
+  const scoreEl=document.getElementById('score');
+  const healthEl=document.getElementById('health');
+  const infoEl=document.getElementById('info');
+
+  let bullets=[], asteroids=[], particles=[];
+  let score=0, earthHealth=100, gameRunning=false;
+  let mouse={x:W/2,y:H/2};
+  let earthHitGlow=0;
+
+  const earthImg=new Image();
+  earthImg.src="https://upload.wikimedia.org/wikipedia/commons/9/97/The_Earth_seen_from_Apollo_17.jpg";
+
+  const earth={x:W/2, y:H-150, radius:120};
+  const cannon={x:earth.x,y:earth.y-90,angle:-Math.PI/2};
+
+  const stars=[];
+  for(let i=0;i<200;i++)
+    stars.push({x:Math.random()*W,y:Math.random()*H,r:Math.random()*1.5,a:Math.random()*0.6});
+
+  window.addEventListener('mousemove',e=>{
+    mouse.x=e.clientX;mouse.y=e.clientY;
+    cannon.angle=Math.atan2(mouse.y-cannon.y,mouse.x-cannon.x);
+  });
+  window.addEventListener('resize',()=>{
+    W=canvas.width=window.innerWidth;H=canvas.height=window.innerHeight;
+    earth.x=W/2;earth.y=H-150;cannon.x=earth.x;cannon.y=earth.y-90;
+  });
+
+  class Bullet{
+    constructor(x,y,a){this.x=x;this.y=y;this.a=a;this.r=4;this.s=9;}
+    update(){this.x+=Math.cos(this.a)*this.s;this.y+=Math.sin(this.a)*this.s;}
+    draw(){ctx.save();ctx.fillStyle='#00ffee';ctx.shadowColor='#00ffee';ctx.shadowBlur=10;
+      ctx.beginPath();ctx.arc(this.x,this.y,this.r,0,Math.PI*2);ctx.fill();ctx.restore();}
+  }
+
+  class Asteroid{
+    constructor(x,y,r,s,c){this.x=x;this.y=y;this.r=r;this.s=s;this.c=c;this.rot=Math.random()*Math.PI*2;}
+    update(){this.y+=this.s;this.rot+=0.01;}
+    draw(){ctx.save();ctx.translate(this.x,this.y);ctx.rotate(this.rot);
+      const grd=ctx.createRadialGradient(0,0,this.r*0.2,0,0,this.r);
+      grd.addColorStop(0,'#bbb');grd.addColorStop(1,this.c);
+      ctx.fillStyle=grd;ctx.beginPath();ctx.arc(0,0,this.r,0,Math.PI*2);ctx.fill();
+      ctx.restore();}
+  }
+
+  class Particle{
+    constructor(x,y,color){
+      this.x=x;this.y=y;
+      this.vx=(Math.random()-0.5)*8;
+      this.vy=(Math.random()-0.7)*8;
+      this.life=1;this.decay=0.02+Math.random()*0.03;
+      this.r=2+Math.random()*3;this.color=color;
+    }
+    update(){this.x+=this.vx;this.y+=this.vy;this.vy+=0.1;this.life-=this.decay;}
+    draw(){
+      if(this.life<=0)return;
+      ctx.save();ctx.globalAlpha=this.life;
+      ctx.fillStyle=this.color;
+      ctx.beginPath();ctx.arc(this.x,this.y,this.r,0,Math.PI*2);ctx.fill();
+      ctx.restore();
+    }
+  }
+
+  function createExplosion(x,y,color='#ffcc66',amount=40){
+    for(let i=0;i<amount;i++)
+      particles.push(new Particle(x,y,color));
+  }
+
+  function fireBullet(){bullets.push(new Bullet(cannon.x,cannon.y,cannon.angle));}
+
+  function spawnAsteroid(){
+    const x=40+Math.random()*(W-80);
+    const r=15+Math.random()*30;
+    const s=0.6+Math.random()*1.2; // slower speed
+    const color=Math.random()<0.3?'#ff6666':'#9999aa';
+    asteroids.push(new Asteroid(x,-60,r,s,color));
+    infoEl.textContent='Asteroid detected...';
+  }
+
+  function updateCollisions(){
+    for(let i=asteroids.length-1;i>=0;i--){
+      const a=asteroids[i];
+      for(let j=bullets.length-1;j>=0;j--){
+        const b=bullets[j];
+        const d=Math.hypot(a.x-b.x,a.y-b.y);
+        if(d<a.r+b.r){
+          score+=10;
+          createExplosion(a.x,a.y,'#ffcc88',50);
+          asteroids.splice(i,1);
+          bullets.splice(j,1);
+          break;
+        }
+      }
+      const dx=a.x-earth.x,dy=a.y-earth.y;
+      if(Math.hypot(dx,dy)<earth.radius+a.r){
+        earthHealth-=5;
+        createExplosion(a.x,a.y,'#ff6644',60);
+        earthHitGlow=1;
+        asteroids.splice(i,1);
+      }else if(a.y>H+100)asteroids.splice(i,1);
+    }
+    scoreEl.textContent=score;
+    healthEl.textContent=Math.max(0,Math.floor(earthHealth));
+    if(earthHealth<=0 && gameRunning){
+      gameRunning=false;
+      finalScoreEl.textContent=score;
+      gameOverEl.style.display='flex';
+    }
+  }
+
+  function drawStars(){
+    ctx.clearRect(0,0,W,H);
+    for(let s of stars){
+      ctx.globalAlpha=s.a;
+      ctx.fillStyle='white';
+      ctx.fillRect(s.x,s.y,s.r,s.r);
+    }
+    ctx.globalAlpha=1;
+  }
+
+  function drawEarth(){
+    if(earthHitGlow>0){
+      const glow=ctx.createRadialGradient(earth.x,earth.y,earth.radius*0.5,earth.x,earth.y,earth.radius*1.5);
+      glow.addColorStop(0,`rgba(255,100,100,${earthHitGlow})`);
+      glow.addColorStop(1,'rgba(0,0,0,0)');
+      ctx.fillStyle=glow;
+      ctx.beginPath();ctx.arc(earth.x,earth.y,earth.radius*1.5,0,Math.PI*2);ctx.fill();
+      earthHitGlow-=0.03;
+    }
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(earth.x,earth.y,earth.radius,0,Math.PI*2);
+    ctx.clip();
+    ctx.drawImage(earthImg,earth.x-earth.radius,earth.y-earth.radius,earth.radius*2,earth.radius*2);
+    ctx.restore();
+  }
+
+  function drawCannon(){
+    ctx.save();
+    ctx.translate(cannon.x,cannon.y);
+    ctx.rotate(cannon.angle);
+    ctx.fillStyle='#00ccff';
+    ctx.shadowColor='#00ccff';
+    ctx.shadowBlur=10;
+    ctx.fillRect(-5,-40,10,50);
+    ctx.fillStyle='#00ffaa';
+    ctx.beginPath();
+    ctx.arc(0,0,10,0,Math.PI*2);
+    ctx.fill();
+    ctx.restore();
+    ctx.shadowBlur=0;
+  }
+
+  let last=performance.now(),spawnTimer=0;
+  function animate(now){
+    if(!gameRunning)return;
+    const dt=now-last; last=now;
+    spawnTimer+=dt;
+    if(spawnTimer>1800){spawnTimer=0;spawnAsteroid();}
+    bullets.forEach(b=>b.update());
+    asteroids.forEach(a=>a.update());
+    particles.forEach(p=>p.update());
+    bullets=bullets.filter(b=>b.y>-50&&b.x>-50&&b.x<W+50&&b.y<H+50);
+    particles=particles.filter(p=>p.life>0);
+    updateCollisions();
+
+    drawStars();
+    drawEarth();
+    asteroids.forEach(a=>a.draw());
+    bullets.forEach(b=>b.draw());
+    drawCannon();
+    particles.forEach(p=>p.draw());
+
+    requestAnimationFrame(animate);
+  }
+
+  function resetGame(){
+    bullets=[];asteroids=[];particles=[];
+    score=0;earthHealth=100;gameRunning=true;
+    spawnTimer=0;scoreEl.textContent=0;healthEl.textContent=100;
+    requestAnimationFrame(animate);
+  }
+
+  startBtn.onclick=()=>{startScreen.style.display='none';resetGame();};
+  restartBtn.onclick=()=>{gameOverEl.style.display='none';resetGame();};
+  window.onclick=()=>{if(gameRunning)fireBullet();};
+})();
+</script>
+</body>
+</html>
